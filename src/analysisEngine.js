@@ -17,86 +17,67 @@ const STOPWORDS = new Set([
     return matches || [];
   }
   
-  function analyzeText(raw, keywordRaw) {
-    const text = normalizeText(raw).trim();
-    const keyword = (keywordRaw || '').toLowerCase().trim();
+  function analyzeText(rawText = "", rawKeyword = "") {
+    const text = String(rawText);
+    const keyword = String(rawKeyword || "").trim().toLowerCase();
   
-    const characters = text.length;
-    const spaces = (text.match(/ /g) || []).length;
-    const charactersNoSpaces = characters - spaces;
+    const words = text.match(/\b\w+\b/g) || [];
+    const wordCount = words.length;
+    const charCount = text.length;
   
+    const sentences = text.match(/[^\.!\?]+[\.!\?]+/g) || [];
     const paragraphs = text
-      ? text.split(/\n{2,}/).filter(p => p.trim().length > 0).length
-      : 0;
+      .split(/\n\s*\n/)
+      .filter((p) => p.trim().length > 0);
   
-    let sentenceCount = 0;
-    if (text) {
-      const punctuated = text.match(/[^.!?]+[.!?]+/g) || [];
-      const leftover = text.replace(/[^.!?]+[.!?]+/g, '').trim();
-      const lineSentences = leftover
-        ? leftover.split('\n').filter(s => s.trim().length > 0)
-        : [];
-      sentenceCount = punctuated.length + lineSentences.length;
-      if (sentenceCount === 0 && text.length > 0) sentenceCount = 1;
-    }
+    const readingTimeSeconds = wordCount / 3.75; // ~225 wpm
+    const speakingTimeSeconds = wordCount / 2.5; // ~150 wpm
   
-    const tokens = tokenizeWords(text);
-    const wordCount = tokens.length;
-  
-    const readingTimeSeconds = wordCount ? wordCount / (225 / 60) : 0;
-    const speakingTimeSeconds = wordCount ? wordCount / (150 / 60) : 0;
-    const pageCount = wordCount ? Math.ceil(wordCount / 500) : 0;
-  
-    // Keyword stats
     let keywordCount = 0;
     let keywordDensity = 0;
-    if (keyword && wordCount) {
-      const re = new RegExp(`\\b${escapeRegex(keyword)}\\b`, 'gi');
-      keywordCount = (text.match(re) || []).length;
-      keywordDensity = +((keywordCount / wordCount) * 100).toFixed(2);
+    if (keyword) {
+      const regex = new RegExp(`\\b${keyword}\\b`, "gi");
+      keywordCount = (text.match(regex) || []).length;
+      keywordDensity = wordCount
+        ? Number(((keywordCount / wordCount) * 100).toFixed(2))
+        : 0;
     }
   
-    const topKeywords = buildTopKeywords(tokens, wordCount);
-    const repeatedPhrases = buildRepeatedPhrases(tokens);
+    // Repeated 3-word phrases (top 5)
+    const tokens = text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
   
-    const warnings = [];
-    if (wordCount) {
-      if (keyword && keywordDensity > 5 && wordCount > 200) {
-        warnings.push(
-          `High focus on "${keyword}" (${keywordDensity}% of words). Might look like keyword stuffing.`
-        );
-      }
-      if (sentenceCount && wordCount / sentenceCount > 35) {
-        warnings.push('Average sentence length is high. Shorten sentences for clarity.');
-      }
-      if (paragraphs && wordCount / paragraphs > 200) {
-        warnings.push('Paragraphs are very long. Break them up for readability.');
-      }
-      if (!keyword && topKeywords[0] && topKeywords[0].density > 7 && wordCount > 300) {
-        warnings.push(
-          `Text leans heavily on "${topKeywords[0].word}". Consider wording variety.`
-        );
-      }
+    const phrases = {};
+    for (let i = 0; i < tokens.length - 2; i++) {
+      const phrase = `${tokens[i]} ${tokens[i + 1]} ${tokens[i + 2]}`;
+      if (phrase.length <= 10) continue;
+      phrases[phrase] = (phrases[phrase] || 0) + 1;
     }
+  
+    const repeatedPhrases = Object.entries(phrases)
+      .filter(([, count]) => count > 1)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([phrase, count]) => ({ phrase, count }));
   
     return {
+      ok: true,
       wordCount,
-      characters,
-      charactersNoSpaces,
-      spaces,
-      sentenceCount,
-      paragraphCount,
-      readingTimeSeconds,
-      speakingTimeSeconds,
-      pageCount,
-      keyword,
+      charCount,
+      sentenceCount: sentences.length,
+      paragraphCount: paragraphs.length,
+      readingTime: Math.ceil(readingTimeSeconds),
+      speakingTime: Math.ceil(speakingTimeSeconds),
       keywordCount,
       keywordDensity,
-      topKeywords,
       repeatedPhrases,
-      warnings
     };
   }
+  
+  module.exports = { analyzeText };
   
   function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
